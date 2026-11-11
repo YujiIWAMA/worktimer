@@ -206,6 +206,13 @@ function adopt(sd){
   db = migrate(sd); db.settings.notify = notify;
   Store.save(db); render();
 }
+async function authMsg(r){
+  try{
+    const j = await r.json();
+    if(j.tokenConfigured === false) return 'サーバーにTOKENが未設定です（Cloudflareの環境変数と再デプロイを確認）';
+    return 'トークンが一致しません（このアプリは' + j.sentLength + '文字を送信）';
+  }catch(e){ return 'トークンが違います'; }
+}
 let pushing = false, pushAgain = false;
 async function push(){
   if(!token()) return;
@@ -214,7 +221,7 @@ async function push(){
   try{
     const r = await api('/api/state', {method:'PUT', body:JSON.stringify(db)});
     if(r.status === 409){ adopt((await r.json()).db); setSync('他の端末の記録を取り込みました'); }
-    else if(r.status === 401) setSync('トークンが違います');
+    else if(r.status === 401) setSync(await authMsg(r));
     else if(r.ok) setSync('OK（' + hm(Date.now()) + '）');
     else setSync('エラー ' + r.status);
   }catch(e){ setSync('オフライン（あとで送信）'); }
@@ -224,7 +231,7 @@ async function pull(){
   if(!token()){ setSync('オフ（トークン未設定）'); return; }
   try{
     const r = await api('/api/state');
-    if(r.status === 401){ setSync('トークンが違います'); return; }
+    if(r.status === 401){ setSync(await authMsg(r)); return; }
     if(!r.ok){ setSync('エラー ' + r.status); return; }
     const s = (await r.json()).db;
     const sa = s ? (s.updatedAt || 0) : 0, la = db.updatedAt || 0;
