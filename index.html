@@ -24,6 +24,14 @@ h1{font-size:18px;margin:0}
 .card{background:var(--card);border-radius:16px;padding:16px;margin-bottom:12px;border:1px solid var(--line)}
 button{font:inherit;color:inherit}
 .icon{background:none;border:0;font-size:22px;padding:6px 10px;cursor:pointer}
+.mascot{width:min(240px,72%);aspect-ratio:3/2;margin:0 auto 12px;border-radius:16px;overflow:hidden;background:var(--bg)}
+.mascot[hidden]{display:none}
+.mascot img{display:block;width:100%;height:100%;object-fit:cover;transform:scale(1.03)}
+.mascot img.work{animation:bob 1.8s ease-in-out infinite}
+.mascot img.rest{animation:breathe 4.5s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:scale(1.03) translateY(0)}50%{transform:scale(1.03) translateY(-3px)}}
+@keyframes breathe{0%,100%{transform:scale(1.03)}50%{transform:scale(1.06)}}
+@media(prefers-reduced-motion:reduce){.mascot img{animation:none!important}}
 .state{display:flex;align-items:center;gap:8px;color:var(--mute);font-size:14px}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none;background:var(--other)}
 .clock{font-size:56px;font-weight:700;letter-spacing:.02em;font-variant-numeric:tabular-nums;text-align:center;margin:6px 0 0}
@@ -88,6 +96,7 @@ dialog input[type=checkbox]{width:auto;margin-right:8px}
   </header>
 
   <section class="card" id="now">
+    <div class="mascot" id="mascotBox"><img id="mascot" alt="" decoding="async"></div>
     <div class="state"><span class="dot" id="stateDot"></span><span id="stateLabel">停止中</span></div>
     <div class="clock" id="clock">--:--</div>
     <div class="sub" id="sub"></div>
@@ -401,8 +410,20 @@ function render(){
   if(db.current && !document.hidden) startTick(); else stopTick();
 }
 
+/* 状態に合わせて犬の絵を切り替える（作業中=作業の絵、休憩・停止中=眠っている絵）。
+   動きはCSSだけ。画面が見えていない間はブラウザが自動で止める */
+const MASCOT = {work:'mascot-work.webp', rest:'mascot-rest.webp'};
+function renderMascot(c){
+  const img = $('#mascot'); if(!img) return;
+  const kind = (c && c.type === 'work') ? 'work' : 'rest';
+  if(img.getAttribute('src') !== MASCOT[kind]) img.src = MASCOT[kind];
+  img.className = !c ? 'still' : kind;   // 停止中は動かさない
+  img.alt = kind === 'work' ? '作業中の犬' : '眠っている犬';
+}
+
 function renderNow(){
   const c = db.current;
+  renderMascot(c);
   $('#stateLabel').textContent = !c ? '停止中' : c.type === 'break' ? '休憩中' : c.label + ' を作業中';
   $('#stateDot').style.background = c ? COLORS[keyOf(c)] : 'var(--other)';
   $('#planRow').hidden = !c;
@@ -612,6 +633,11 @@ if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+{ // 画像が無い・読めないときは枠ごと隠す（アプリ本体は普通に動く）
+  const im = $('#mascot'), box = $('#mascotBox');
+  im.onerror = () => { box.hidden = true; };
+  im.onload = () => { box.hidden = false; };
+}
 render();
 pull();
 window.addEventListener('online', pull);

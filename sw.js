@@ -1,8 +1,15 @@
-const CACHE = 'worklog-v3';
-const ASSETS = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+const CACHE = 'worklog-v4';
+const ASSETS = [
+  './', 'index.html', 'manifest.webmanifest',
+  'icon-192.png', 'icon-512.png', 'favicon-32.png', 'favicon-64.png',
+  'mascot-work.webp', 'mascot-rest.webp'
+];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+  // 1つでも無いファイルがあっても、全体の初期化は失敗させない
+  e.waitUntil(
+    caches.open(CACHE).then(c => Promise.allSettled(ASSETS.map(a => c.add(a))))
+  );
   self.skipWaiting();
 });
 
