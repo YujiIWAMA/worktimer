@@ -145,6 +145,10 @@ dialog input[type=checkbox]{width:auto;margin-right:8px}
     <input type="number" id="sBreak" min="1" max="120" inputmode="numeric">
     <label><input type="checkbox" id="sNotify">終了時に通知する</label>
     <div class="note">通知はアプリが生きている間だけ届きます。電池節約のため常駐はしません。iPhoneはホーム画面に追加すると使えます。</div>
+    <label for="sToken">同期トークン（Cloudflareに登録した合言葉）</label>
+    <input type="password" id="sToken" autocomplete="off" autocapitalize="off" placeholder="空欄なら端末内のみ">
+    <div class="note" id="syncStatus">同期: オフ</div>
+    <div class="row"><button type="button" id="syncNow">今すぐ同期</button></div>
     <div class="row">
       <button type="button" id="exJson">JSON保存</button>
       <button type="button" id="exCsv">CSV保存</button>
@@ -184,7 +188,51 @@ const Store = {
   save(d){ try{ localStorage.setItem(KEY, JSON.stringify(d)); }catch(e){} }
 };
 let db = Store.load();
-const save = () => Store.save(db);
+/* ---------- 同期（Cloudflare Pages Functions + KV） ----------
+   ・トークン未設定なら端末内だけで動く
+   ・保存のたびに全データを送り、開いたとき/表示したときに取り込む（常時接続はしない）
+   ・新しい updatedAt が勝つ（1人利用前提） */
+const TKEY = 'worklog.token';   // トークンはデータ本体(db)に入れない＝サーバーに送らない
+const token = () => { try{ return localStorage.getItem(TKEY) || ''; }catch(e){ return ''; } };
+const api = (path, opts = {}) => fetch(path, {...opts, cache:'no-store',
+  headers:{'Authorization':'Bearer ' + token(), 'Content-Type':'application/json'}});
+function setSync(msg){ const el = document.querySelector('#syncStatus'); if(el) el.textContent = '同期: ' + msg; }
+if(!db.updatedAt && (db.sessions.length || db.current)){ db.updatedAt = Date.now(); Store.save(db); }
+
+function save(){ db.updatedAt = Date.now(); Store.save(db); push(); }
+
+function adopt(sd){
+  const notify = db.settings.notify;   // 通知の許可は端末ごと
+  db = migrate(sd); db.settings.notify = notify;
+  Store.save(db); render();
+}
+let pushing = false, pushAgain = false;
+async function push(){
+  if(!token()) return;
+  if(pushing){ pushAgain = true; return; }
+  pushing = true;
+  try{
+    const r = await api('/api/state', {method:'PUT', body:JSON.stringify(db)});
+    if(r.status === 409){ adopt((await r.json()).db); setSync('他の端末の記録を取り込みました'); }
+    else if(r.status === 401) setSync('トークンが違います');
+    else if(r.ok) setSync('OK（' + hm(Date.now()) + '）');
+    else setSync('エラー ' + r.status);
+  }catch(e){ setSync('オフライン（あとで送信）'); }
+  finally{ pushing = false; if(pushAgain){ pushAgain = false; push(); } }
+}
+async function pull(){
+  if(!token()){ setSync('オフ（トークン未設定）'); return; }
+  try{
+    const r = await api('/api/state');
+    if(r.status === 401){ setSync('トークンが違います'); return; }
+    if(!r.ok){ setSync('エラー ' + r.status); return; }
+    const s = (await r.json()).db;
+    const sa = s ? (s.updatedAt || 0) : 0, la = db.updatedAt || 0;
+    if(sa > la) adopt(s);
+    else if(la > sa) await push();
+    setSync('OK（' + hm(Date.now()) + '）');
+  }catch(e){ setSync('オフライン'); }
+}
 
 /* ---------- ユーティリティ ---------- */
 const $ = s => document.querySelector(s);
@@ -289,7 +337,7 @@ function hideBanner(){ $('#banner').hidden = true; }
 
 document.addEventListener('visibilitychange', () => {
   if(document.hidden) stopTick();
-  else { db = Store.load(); render(); }
+  else { db = Store.load(); render(); pull(); }
 });
 
 /* ---------- 集計 ---------- */
@@ -513,13 +561,16 @@ $('#btnSettings').onclick = () => {
   $('#sWork').value = db.settings.work;
   $('#sBreak').value = db.settings.break;
   $('#sNotify').checked = !!db.settings.notify;
+  $('#sToken').value = token();
   sd.showModal();
 };
+const saveToken = () => { try{ localStorage.setItem(TKEY, $('#sToken').value.trim()); }catch(e){} };
 $('#sClose').onclick = () => {
   db.settings.work = Math.max(1, parseInt($('#sWork').value, 10) || 30);
   db.settings.break = Math.max(1, parseInt($('#sBreak').value, 10) || 5);
-  save(); sd.close();
+  saveToken(); save(); sd.close(); pull();
 };
+$('#syncNow').onclick = () => { saveToken(); setSync('同期中…'); pull(); };
 $('#sNotify').onchange = async e => {
   if(!e.target.checked){ db.settings.notify = false; save(); return; }
   if(!('Notification' in window)){ e.target.checked = false; return alert('この環境は通知に対応していません'); }
@@ -553,6 +604,8 @@ if('serviceWorker' in navigator && location.protocol.startsWith('http')){
 }
 if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 render();
+pull();
+window.addEventListener('online', pull);
 </script>
 </body>
 </html>

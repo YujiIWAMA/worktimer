@@ -1,4 +1,4 @@
-const CACHE = 'worklog-v2';
+const CACHE = 'worklog-v3';
 const ASSETS = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -16,6 +16,8 @@ self.addEventListener('activate', e => {
 // ネットワーク優先、オフライン時はキャッシュ
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // 同期APIはキャッシュしない（古い状態を返さないため）
+  if (new URL(e.request.url).pathname.startsWith('/api/')) return;
   e.respondWith(
     fetch(e.request)
       .then(r => {
