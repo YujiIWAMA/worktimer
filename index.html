@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#2f6fed">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="作業ログ">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>作業ログ</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#1b1f24;--mute:#6b7280;--line:#e5e7eb;
+--c1:#2f6fed;--c2:#8250df;--c3:#8b8fa3;--break:#2da44e;--other:#8b8fa3;--over:#d1242f}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#1a1d23;--fg:#e8eaed;--mute:#9aa0a6;--line:#2a2e36;--over:#ff6b6b}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:520px;margin:0 auto;padding:12px 14px 40px}
+header{display:flex;justify-content:space-between;align-items:center;margin:4px 0 10px}
+h1{font-size:18px;margin:0}
+.card{background:var(--card);border-radius:16px;padding:16px;margin-bottom:12px;border:1px solid var(--line)}
+button{font:inherit;color:inherit}
+.icon{background:none;border:0;font-size:22px;padding:6px 10px;cursor:pointer}
+.state{display:flex;align-items:center;gap:8px;color:var(--mute);font-size:14px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none;background:var(--other)}
+.clock{font-size:56px;font-weight:700;letter-spacing:.02em;font-variant-numeric:tabular-nums;text-align:center;margin:6px 0 0}
+.clock.over{color:var(--over)}
+.sub{text-align:center;color:var(--mute);font-size:13px;min-height:20px}
+.plan{display:flex;justify-content:center;align-items:center;gap:8px;margin:10px 0;color:var(--mute);font-size:14px}
+.plan input{width:72px;font:inherit;text-align:center;padding:6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.banner{background:#fff4e5;color:#7a4a00;border-radius:10px;padding:10px 12px;margin:8px 0;font-size:14px}
+@media(prefers-color-scheme:dark){.banner{background:#3a2a10;color:#ffd699}}
+.hint{color:var(--mute);font-size:13px;margin:12px 0 6px}
+.labels{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.lb{height:64px;border:0;border-radius:14px;color:#fff;font-size:16px;font-weight:700;cursor:pointer}
+.lb:active{opacity:.85}
+.lb:disabled{cursor:default}
+.lb.dim{opacity:.4}
+.lb.cur{box-shadow:inset 0 0 0 3px rgba(255,255,255,.85)}
+.main{display:block;width:100%;height:56px;border:0;border-radius:14px;color:#fff;font-size:18px;font-weight:700;background:var(--break);cursor:pointer;margin-top:10px}
+.main:active{opacity:.85}
+.ghost{width:100%;margin-top:10px;border:1px solid var(--line);background:none;border-radius:12px;padding:10px;cursor:pointer;font-size:14px;color:var(--mute)}
+.daynav{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.daynav button{background:none;border:1px solid var(--line);border-radius:10px;width:40px;height:36px;font-size:18px;cursor:pointer}
+.daynav button:disabled{opacity:.3}
+.bar{position:relative;height:44px;border-radius:10px;background:var(--bg);overflow:hidden}
+.seg{position:absolute;top:0;bottom:0;border:0;padding:0;min-width:2px;cursor:pointer;border-right:1px solid var(--card)}
+.ticks{position:relative;height:18px;font-size:11px;color:var(--mute);margin-top:3px}
+.ticks span{position:absolute;transform:translateX(-50%)}
+.empty{color:var(--mute);text-align:center;font-size:14px;padding:14px 0}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:12px 0 8px}
+.stats3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 10px}
+.tile{background:var(--bg);border-radius:12px;padding:10px 12px}
+.tile small{display:flex;align-items:center;gap:6px;color:var(--mute);font-size:12px}
+.tile b{font-size:18px}
+.stats3 .tile b{font-size:15px}
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--line);cursor:pointer;font-size:14px}
+li .t{font-variant-numeric:tabular-nums;color:var(--mute)}
+li .d{margin-left:auto;color:var(--mute)}
+li i{color:var(--mute);font-style:normal;font-size:12px;max-width:30%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+summary{cursor:pointer;font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px;font-variant-numeric:tabular-nums}
+th,td{padding:6px 3px;text-align:right;border-top:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left}
+th{color:var(--mute);font-weight:500;font-size:12px}
+dialog{border:0;border-radius:16px;padding:18px;width:min(92vw,420px);background:var(--card);color:var(--fg)}
+dialog::backdrop{background:rgba(0,0,0,.4)}
+dialog h2{font-size:17px;margin:0 0 12px}
+label{display:block;font-size:13px;color:var(--mute);margin:10px 0 4px}
+dialog input,dialog select{width:100%;font:inherit;padding:9px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+dialog input[type=checkbox]{width:auto;margin-right:8px}
+.row{display:flex;gap:8px;margin-top:16px}
+.row button{flex:1;padding:11px;border-radius:12px;border:1px solid var(--line);background:none;cursor:pointer}
+.row .pri{background:var(--c1);color:#fff;border-color:var(--c1)}
+.row .del{color:var(--over)}
+.note{font-size:12px;color:var(--mute);margin-top:6px}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>作業ログ</h1>
+    <button class="icon" id="btnSettings" aria-label="設定">⚙</button>
+  </header>
+
+  <section class="card" id="now">
+    <div class="state"><span class="dot" id="stateDot"></span><span id="stateLabel">停止中</span></div>
+    <div class="clock" id="clock">--:--</div>
+    <div class="sub" id="sub"></div>
+    <div class="banner" id="banner" hidden></div>
+    <div class="plan" id="planRow" hidden>予定 <input id="planInput" type="number" min="0" max="480" inputmode="numeric"> 分（0=タイマーなし）</div>
+    <div class="hint" id="startHint">作業を始める</div>
+    <div class="labels" id="labels"></div>
+    <button class="main" id="breakBtn" hidden>休憩する</button>
+    <button class="ghost" id="stopBtn" hidden>停止（記録を閉じる）</button>
+  </section>
+
+  <section class="card">
+    <div class="daynav">
+      <button id="prevDay" aria-label="前の日">‹</button>
+      <div id="dayLabel"></div>
+      <button id="nextDay" aria-label="次の日">›</button>
+    </div>
+    <div class="bar" id="bar"></div>
+    <div class="ticks" id="ticks"></div>
+    <div class="stats" id="stats"></div>
+    <div class="stats3" id="stats3"></div>
+    <ul id="list"></ul>
+    <button class="ghost" id="addBtn">＋ 手動で追加</button>
+  </section>
+
+  <details class="card">
+    <summary>直近7日（時:分）</summary>
+    <table id="week"></table>
+  </details>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog" id="dlgForm">
+    <h2 id="dlgTitle">区間を編集</h2>
+    <label for="fType">内容</label>
+    <select id="fType"></select>
+    <label for="fStart">開始</label>
+    <input type="datetime-local" id="fStart" required>
+    <label for="fEnd">終了</label>
+    <input type="datetime-local" id="fEnd">
+    <label for="fNote">メモ</label>
+    <input type="text" id="fNote" placeholder="例：科研費の申請書">
+    <div class="row">
+      <button type="button" class="del" id="fDel">削除</button>
+      <button type="button" id="fCancel">キャンセル</button>
+      <button type="button" class="pri" id="fSave">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="setDlg">
+  <form method="dialog">
+    <h2>設定</h2>
+    <label for="sWork">作業タイマーの初期値（分）</label>
+    <input type="number" id="sWork" min="1" max="480" inputmode="numeric">
+    <label for="sBreak">休憩タイマーの初期値（分）</label>
+    <input type="number" id="sBreak" min="1" max="120" inputmode="numeric">
+    <label><input type="checkbox" id="sNotify">終了時に通知する</label>
+    <div class="note">通知はアプリが生きている間だけ届きます。電池節約のため常駐はしません。iPhoneはホーム画面に追加すると使えます。</div>
+    <div class="row">
+      <button type="button" id="exJson">JSON保存</button>
+      <button type="button" id="exCsv">CSV保存</button>
+    </div>
+    <div class="row">
+      <button type="button" class="del" id="clearAll">全データ削除</button>
+      <button type="button" class="pri" id="sClose">閉じる</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+'use strict';
+/* ラベルを変えたいときはここだけ編集（先頭から順に色が c1, c2, c3） */
+const LABELS = ['研究', '授業準備', 'その他'];
+const COLORS = {'研究':'var(--c1)', '授業準備':'var(--c2)', 'その他':'var(--c3)', '休憩':'var(--break)'};
+const keyOf = x => x.type === 'break' ? '休憩' : (x.label || 'その他');
+const t0 = x => x.blockStart || x.start;   // タイマーの起点（ラベルを切り替えても続く）
+
+/* ---------- 保存層（ここをFirebaseに差し替えれば同期できる） ---------- */
+const KEY = 'worklog.v1';
+function migrate(d){
+  const fix = x => {
+    if(x.type === 'meeting' || x.type === 'other'){ x.type = 'work'; x.label = 'その他'; }
+    if(x.type === 'work' && !LABELS.includes(x.label)) x.label = '研究';
+  };
+  d.sessions.forEach(fix);
+  if(d.current){ fix(d.current); if(!d.current.blockStart) d.current.blockStart = d.current.start; }
+  d.settings = Object.assign({work:30, break:5, notify:false}, d.settings);
+  return d;
+}
+const Store = {
+  load(){
+    try{ const d = JSON.parse(localStorage.getItem(KEY)); if(d && d.sessions) return migrate(d); }catch(e){}
+    return migrate({sessions:[], current:null, settings:{}});
+  },
+  save(d){ try{ localStorage.setItem(KEY, JSON.stringify(d)); }catch(e){} }
+};
+let db = Store.load();
+const save = () => Store.save(db);
+
+/* ---------- ユーティリティ ---------- */
+const $ = s => document.querySelector(s);
+const pad = n => String(n).padStart(2,'0');
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const hm = t => { const d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
+const dur = ms => { const m = Math.round(ms/60000); return m >= 60 ? Math.floor(m/60) + '時間' + pad(m%60) + '分' : m + '分'; };
+const hmm = ms => { const m = Math.round(ms/60000); return Math.floor(m/60) + ':' + pad(m%60); };
+const mmss = sec => {
+  const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60), s = sec%60;
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+};
+const toLocalInput = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const fromLocalInput = v => new Date(v).getTime();
+const WD = ['日','月','火','水','木','金','土'];
+
+/* ---------- 記録操作 ---------- */
+function closeCurrent(end){
+  const c = db.current; if(!c) return;
+  if(end - c.start >= 1000){
+    db.sessions.push({id:uid(), type:c.type, label:c.label || '', start:c.start, end, planned:c.planned, note:c.note || ''});
+  }
+  db.current = null;
+}
+function startWork(label){
+  const now = Date.now(), c = db.current;
+  if(c && c.type === 'work'){
+    // 作業中のラベル切替：区間は分けるが、30分タイマーは続ける
+    const keep = {planned:c.planned, notified:c.notified, blockStart:t0(c)};
+    closeCurrent(now);
+    db.current = {type:'work', label, start:now, note:'', ...keep};
+  } else {
+    closeCurrent(now);
+    db.current = {type:'work', label, start:now, blockStart:now, planned:db.settings.work, notified:false, note:''};
+  }
+  hideBanner(); save(); render();
+}
+function startBreak(){
+  const now = Date.now();
+  closeCurrent(now);
+  db.current = {type:'break', label:'', start:now, blockStart:now, planned:db.settings.break, notified:false, note:''};
+  hideBanner(); save(); render();
+}
+function stopAll(){
+  closeCurrent(Date.now());
+  hideBanner(); save(); render();
+}
+
+/* ---------- タイマー（常駐させない設計） ----------
+   ・経過は常に「開始時刻 - 現在時刻」で計算するので、画面を閉じても狂わない
+   ・1秒ごとの更新は画面が見えている間だけ
+   ・通知用に「終了時刻へのsetTimeout」を1本だけ張る（ポーリングはしない） */
+let iv = null, alarmT = null, tickN = 0;
+
+function tick(){
+  const c = db.current; if(!c) return;
+  const el = Date.now() - t0(c);
+  const clock = $('#clock');
+  if(c.planned > 0){
+    const rem = c.planned*60000 - el;
+    if(rem >= 0){ clock.textContent = mmss(Math.ceil(rem/1000)); clock.className = 'clock'; }
+    else { clock.textContent = '+' + mmss(Math.floor(-rem/1000)); clock.className = 'clock over'; }
+  } else {
+    clock.textContent = mmss(Math.floor(el/1000)); clock.className = 'clock';
+  }
+  $('#sub').textContent = `${hm(t0(c))} から ・ 経過 ${dur(el)}`;
+  if(c.planned > 0 && !c.notified && el >= c.planned*60000) fire(c, false);
+  if(++tickN % 60 === 0) renderTimeline();
+}
+function startTick(){ stopTick(); tick(); iv = setInterval(tick, 1000); }
+function stopTick(){ if(iv){ clearInterval(iv); iv = null; } }
+
+function scheduleAlarm(){
+  clearTimeout(alarmT);
+  const c = db.current;
+  if(!c || !c.planned || c.notified) return;
+  const ms = t0(c) + c.planned*60000 - Date.now();
+  if(ms <= 0){ fire(c, true); return; }
+  alarmT = setTimeout(() => fire(c, false), Math.min(ms, 2147483000));
+}
+
+async function fire(c, late){
+  const cur = db.current;
+  if(!cur || t0(cur) !== t0(c) || cur.type !== c.type || cur.notified) return;
+  cur.notified = true; save();
+  const msg = c.type === 'work' ? `${c.planned}分経ちました。休憩しましょう`
+                                : `休憩${c.planned}分が終わりました。作業に戻れます`;
+  showBanner(late ? '予定時間を過ぎています：' + msg : msg);
+  if(late) return;
+  if(navigator.vibrate) navigator.vibrate([200,100,200]);
+  if(db.settings.notify && 'Notification' in window && Notification.permission === 'granted'){
+    try{
+      const reg = await navigator.serviceWorker?.getRegistration();
+      if(reg) reg.showNotification('作業ログ', {body:msg, tag:'worklog', renotify:true});
+      else new Notification('作業ログ', {body:msg});
+    }catch(e){}
+  }
+}
+function showBanner(t){ const b = $('#banner'); b.textContent = t; b.hidden = false; }
+function hideBanner(){ $('#banner').hidden = true; }
+
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden) stopTick();
+  else { db = Store.load(); render(); }
+});
+
+/* ---------- 集計 ---------- */
+function dayInfo(off){
+  const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate() - off);
+  const s = d.getTime(); const e = new Date(d); e.setDate(e.getDate() + 1);
+  return {s, e:e.getTime(), date:d};
+}
+function allSessions(){
+  const a = db.sessions.slice();
+  if(db.current){
+    a.push({id:'cur', type:db.current.type, label:db.current.label, start:db.current.start, end:Date.now(),
+      planned:db.current.planned, note:db.current.note || '', live:true});
+  }
+  return a.sort((x,y) => x.start - y.start);
+}
+function inDay(off){
+  const {s,e} = dayInfo(off);
+  return allSessions().filter(x => x.end > s && x.start < e)
+    .map(x => ({...x, cs:Math.max(x.start,s), ce:Math.min(x.end,e)}));
+}
+/* 作業はラベルが替わっても1分以内に続いていれば「連続した1ブロック」として数える */
+function calc(list){
+  const r = {work:0, break:0, by:{}, longest:0, due:0, ok:0};
+  LABELS.forEach(l => r.by[l] = 0);
+  let i = 0;
+  while(i < list.length){
+    const x = list[i];
+    if(x.type === 'break'){ r.break += x.ce - x.cs; i++; continue; }
+    let j = i;
+    const add = y => { const d = y.ce - y.cs; r.work += d; r.by[keyOf(y)] = (r.by[keyOf(y)] || 0) + d; };
+    add(x);
+    while(j + 1 < list.length && list[j+1].type === 'work' && list[j+1].cs - list[j].ce <= 60000){ j++; add(list[j]); }
+    r.longest = Math.max(r.longest, list[j].ce - x.cs);
+    const last = list[j];
+    if(!last.live && last.planned && (last.end - x.start) >= last.planned*60000){
+      r.due++;
+      const n = list[j+1];
+      if(n && n.type === 'break' && n.start - last.end <= 5*60000) r.ok++;
+    }
+    i = j + 1;
+  }
+  return r;
+}
+
+/* ---------- 描画 ---------- */
+let dayOffset = 0;
+
+function render(){
+  renderNow(); renderTimeline(); renderWeek();
+  scheduleAlarm();
+  if(db.current && !document.hidden) startTick(); else stopTick();
+}
+
+function renderNow(){
+  const c = db.current;
+  $('#stateLabel').textContent = !c ? '停止中' : c.type === 'break' ? '休憩中' : c.label + ' を作業中';
+  $('#stateDot').style.background = c ? COLORS[keyOf(c)] : 'var(--other)';
+  $('#planRow').hidden = !c;
+  $('#stopBtn').hidden = !c;
+  if(c){ $('#planInput').value = c.planned; }
+  else { $('#clock').textContent = '--:--'; $('#clock').className = 'clock'; $('#sub').textContent = '内容を選ぶと記録を始めます'; }
+
+  $('#startHint').textContent = !c ? '作業を始める' : c.type === 'break' ? '作業に戻る' : '内容を切り替える（タイマーは続きます）';
+  const box = $('#labels'); box.innerHTML = '';
+  LABELS.forEach(l => {
+    const b = document.createElement('button');
+    const isCur = !!(c && c.type === 'work' && c.label === l);
+    b.className = 'lb' + (isCur ? ' cur' : '');
+    b.textContent = l;
+    b.style.background = COLORS[l];
+    b.disabled = isCur;
+    b.onclick = () => startWork(l);
+    box.appendChild(b);
+  });
+  const bb = $('#breakBtn');
+  bb.hidden = !(c && c.type === 'work');
+  bb.onclick = startBreak;
+}
+
+function renderTimeline(){
+  const {s,e,date} = dayInfo(dayOffset);
+  $('#dayLabel').textContent = `${date.getMonth()+1}/${date.getDate()}（${WD[date.getDay()]}）` + (dayOffset === 0 ? ' 今日' : '');
+  $('#nextDay').disabled = dayOffset === 0;
+  const list = inDay(dayOffset);
+  const bar = $('#bar'), ticks = $('#ticks');
+  bar.innerHTML = ''; ticks.innerHTML = '';
+
+  if(!list.length){
+    bar.innerHTML = '<div class="empty">記録がありません</div>';
+  } else {
+    let lo = Math.floor(Math.min(...list.map(x => x.cs)) / 3600000) * 3600000;
+    let hi = Math.ceil(Math.max(...list.map(x => x.ce)) / 3600000) * 3600000;
+    lo = Math.max(lo, s); hi = Math.min(Math.max(hi, lo + 4*3600000), e);
+    if(hi - lo < 3600000) lo = hi - 3600000;
+    const span = hi - lo;
+    list.forEach(x => {
+      const b = document.createElement('button');
+      b.className = 'seg';
+      b.style.left = ((x.cs - lo)/span*100) + '%';
+      b.style.width = ((x.ce - x.cs)/span*100) + '%';
+      b.style.background = COLORS[keyOf(x)];
+      b.title = `${keyOf(x)} ${hm(x.start)}–${x.live ? 'now' : hm(x.end)}`;
+      b.onclick = () => openEdit(x.id);
+      bar.appendChild(b);
+    });
+    const step = span > 12*3600000 ? 3 : span > 6*3600000 ? 2 : 1;
+    for(let t = lo, i = 0; t <= hi; t += 3600000, i++){
+      if(i % step) continue;
+      const sp = document.createElement('span');
+      sp.style.left = ((t - lo)/span*100) + '%';
+      sp.textContent = new Date(t).getHours();
+      ticks.appendChild(sp);
+    }
+  }
+
+  const r = calc(list);
+  const rate = r.due ? `${r.ok}/${r.due}回` : '—';
+  $('#stats').innerHTML =
+    `<div class="tile"><small>作業の合計</small><b>${dur(r.work)}</b></div>` +
+    `<div class="tile"><small>休憩</small><b>${dur(r.break)}</b></div>` +
+    `<div class="tile"><small>最長の連続作業</small><b>${dur(r.longest)}</b></div>` +
+    `<div class="tile"><small>予定超過後に休憩できた</small><b>${rate}</b></div>`;
+  $('#stats3').innerHTML = LABELS.map(l =>
+    `<div class="tile"><small><span class="dot" style="background:${COLORS[l]}"></span>${esc(l)}</small><b>${dur(r.by[l] || 0)}</b></div>`
+  ).join('');
+
+  const ul = $('#list'); ul.innerHTML = '';
+  list.slice().reverse().forEach(x => {
+    const li = document.createElement('li');
+    li.innerHTML = `<span class="dot" style="background:${COLORS[keyOf(x)]}"></span><b>${esc(keyOf(x))}</b>` +
+      `<span class="t">${hm(x.start)}–${x.live ? '' : hm(x.end)}</span>` +
+      (x.note ? `<i>${esc(x.note)}</i>` : '') +
+      `<span class="d">${dur(x.ce - x.cs)}</span>`;
+    li.onclick = () => openEdit(x.id);
+    ul.appendChild(li);
+  });
+}
+
+function renderWeek(){
+  let h = '<tr><th>日</th>' + LABELS.map(l => `<th>${esc(l)}</th>`).join('') + '<th>休憩</th><th>最長</th></tr>';
+  for(let i = 0; i < 7; i++){
+    const di = dayInfo(i), r = calc(inDay(i));
+    h += `<tr><td>${di.date.getMonth()+1}/${di.date.getDate()}(${WD[di.date.getDay()]})</td>` +
+      LABELS.map(l => `<td>${hmm(r.by[l] || 0)}</td>`).join('') +
+      `<td>${hmm(r.break)}</td><td>${hmm(r.longest)}</td></tr>`;
+  }
+  $('#week').innerHTML = h;
+}
+
+/* ---------- 編集ダイアログ ---------- */
+let editingId = null;
+const dlg = $('#dlg');
+const CHOICES = LABELS.concat(['休憩']);
+$('#fType').innerHTML = CHOICES.map(k => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+const toTL = v => v === '休憩' ? {type:'break', label:''} : {type:'work', label:v};
+
+function openEdit(id){
+  editingId = id;
+  let x;
+  if(id === 'cur'){ const c = db.current; x = {type:c.type, label:c.label, start:c.start, end:null, note:c.note || ''}; }
+  else if(id){ x = db.sessions.find(s => s.id === id); }
+  else { const n = Date.now(); x = {type:'work', label:LABELS[0], start:n - 30*60000, end:n, note:''}; }
+  if(!x) return;
+  $('#dlgTitle').textContent = id ? '区間を編集' : '手動で追加';
+  $('#fType').value = keyOf(x);
+  $('#fStart').value = toLocalInput(x.start);
+  $('#fEnd').value = x.end ? toLocalInput(x.end) : '';
+  $('#fEnd').disabled = id === 'cur';
+  $('#fEnd').required = id !== 'cur';
+  $('#fNote').value = x.note || '';
+  $('#fDel').hidden = !id;
+  dlg.showModal();
+}
+$('#fCancel').onclick = () => dlg.close();
+$('#fDel').onclick = () => {
+  if(!confirm('この区間を削除しますか？')) return;
+  if(editingId === 'cur') db.current = null;
+  else db.sessions = db.sessions.filter(s => s.id !== editingId);
+  save(); dlg.close(); render();
+};
+$('#fSave').onclick = () => {
+  const tl = toTL($('#fType').value), note = $('#fNote').value.trim();
+  const start = fromLocalInput($('#fStart').value);
+  if(isNaN(start)) return alert('開始時刻を入力してください');
+  if(editingId === 'cur'){
+    if(start >= Date.now()) return alert('開始は現在より前にしてください');
+    const c = db.current;
+    const kindChanged = c.type !== tl.type;
+    Object.assign(c, tl, {start, note});
+    c.blockStart = kindChanged ? start : Math.min(t0(c), start);
+  } else {
+    const end = fromLocalInput($('#fEnd').value);
+    if(isNaN(end) || end <= start) return alert('終了は開始より後にしてください');
+    if(editingId){
+      Object.assign(db.sessions.find(s => s.id === editingId), tl, {start, end, note});
+    } else {
+      db.sessions.push({id:uid(), ...tl, start, end, planned:0, note});
+    }
+    db.sessions.sort((a,b) => a.start - b.start);
+  }
+  save(); dlg.close(); render();
+};
+$('#addBtn').onclick = () => openEdit(null);
+
+/* ---------- その他のUI ---------- */
+$('#prevDay').onclick = () => { dayOffset++; renderTimeline(); };
+$('#nextDay').onclick = () => { if(dayOffset > 0){ dayOffset--; renderTimeline(); } };
+$('#stopBtn').onclick = stopAll;
+$('#planInput').onchange = e => {
+  const c = db.current; if(!c) return;
+  c.planned = Math.max(0, Math.min(480, parseInt(e.target.value, 10) || 0));
+  if(c.planned*60000 > Date.now() - t0(c)) c.notified = false;
+  e.target.value = c.planned;
+  hideBanner(); save(); scheduleAlarm(); tick();
+};
+
+/* 設定 */
+const sd = $('#setDlg');
+$('#btnSettings').onclick = () => {
+  $('#sWork').value = db.settings.work;
+  $('#sBreak').value = db.settings.break;
+  $('#sNotify').checked = !!db.settings.notify;
+  sd.showModal();
+};
+$('#sClose').onclick = () => {
+  db.settings.work = Math.max(1, parseInt($('#sWork').value, 10) || 30);
+  db.settings.break = Math.max(1, parseInt($('#sBreak').value, 10) || 5);
+  save(); sd.close();
+};
+$('#sNotify').onchange = async e => {
+  if(!e.target.checked){ db.settings.notify = false; save(); return; }
+  if(!('Notification' in window)){ e.target.checked = false; return alert('この環境は通知に対応していません'); }
+  const p = await Notification.requestPermission();
+  db.settings.notify = p === 'granted';
+  e.target.checked = db.settings.notify;
+  if(p !== 'granted') alert('通知が許可されませんでした');
+  save();
+};
+function download(name, text, type){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], {type}));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+$('#exJson').onclick = () => download('worklog.json', JSON.stringify(db, null, 2), 'application/json');
+$('#exCsv').onclick = () => {
+  const rows = [['content','start','end','minutes','planned_min','note']];
+  allSessions().forEach(x => rows.push([keyOf(x), new Date(x.start).toISOString(), new Date(x.end).toISOString(),
+    Math.round((x.end - x.start)/60000), x.planned || 0, '"' + (x.note || '').replace(/"/g,'""') + '"']));
+  download('worklog.csv', '﻿' + rows.map(r => r.join(',')).join('\n'), 'text/csv');
+};
+$('#clearAll').onclick = () => {
+  if(!confirm('記録をすべて削除します。元に戻せません。')) return;
+  db = {sessions:[], current:null, settings:db.settings}; save(); sd.close(); render();
+};
+
+/* 起動 */
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+render();
+</script>
+</body>
+</html>
