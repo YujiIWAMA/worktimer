@@ -162,8 +162,10 @@ dialog input[type=checkbox]{width:auto;margin-right:8px}
     <div class="row"><button type="button" id="syncNow">今すぐ同期</button></div>
     <div class="row">
       <button type="button" id="exJson">JSON保存</button>
+      <button type="button" id="imJson">JSON読み込み</button>
       <button type="button" id="exCsv">CSV保存</button>
     </div>
+    <input type="file" id="imFile" accept="application/json,.json" hidden>
     <div class="row">
       <button type="button" class="del" id="clearAll">全データ削除</button>
       <button type="button" class="pri" id="sClose">閉じる</button>
@@ -181,13 +183,21 @@ const t0 = x => x.blockStart || x.start;   // タイマーの起点（ラベル�
 
 /* ---------- 保存層（ここをFirebaseに差し替えれば同期できる） ---------- */
 const KEY = 'worklog.v1';
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 function migrate(d){
   const fix = x => {
     if(x.type === 'meeting' || x.type === 'other'){ x.type = 'work'; x.label = 'その他'; }
     if(x.type === 'work' && !LABELS.includes(x.label)) x.label = '研究';
   };
-  d.sessions.forEach(fix);
-  if(d.current){ fix(d.current); if(!d.current.blockStart) d.current.blockStart = d.current.start; }
+  d.sessions = Array.isArray(d.sessions) ? d.sessions : [];
+  d.sessions.forEach(x => { fix(x); if(!x.id) x.id = uid(); if(!x.mt) x.mt = x.end || 0; });
+  if(d.current){
+    fix(d.current);
+    if(!d.current.blockStart) d.current.blockStart = d.current.start;
+    if(!d.current.id) d.current.id = uid();
+  }
+  d.deleted = d.deleted || {};                                   // 削除した区間のID（古い端末が復活させないため）
+  if(!d.currentMt) d.currentMt = d.current ? d.current.start : 0; // 進行中の記録を最後に変えた時刻
   d.settings = Object.assign({work:30, break:5, notify:false}, d.settings);
   return d;
 }
@@ -201,8 +211,48 @@ const Store = {
 let db = Store.load();
 /* ---------- 同期（Cloudflare Pages Functions + KV） ----------
    ・トークン未設定なら端末内だけで動く
-   ・保存のたびに全データを送り、開いたとき/表示したときに取り込む（常時接続はしない）
-   ・新しい updatedAt が勝つ（1人利用前提） */
+   ・開いたとき/表示したとき/操作の直前に取り込み、操作のあとに送る（常時接続はしない）
+   ・記録は「上書き」ではなく「足し合わせ」。画面が古い端末が保存しても、新しい記録は消えない
+       区間 … IDごとの和集合（同じIDは更新時刻 mt が新しいほう）
+       削除 … deleted にIDを残す
+       進行中の記録 … currentMt が新しいほう
+   ・利用者の操作だけがサーバーへ送られる（通知済みフラグなどの自動保存は端末内だけ） */
+function normDb(d){
+  d = d || {};
+  return {
+    sessions: Array.isArray(d.sessions) ? d.sessions : [],
+    current: d.current || null,
+    deleted: d.deleted || {},
+    settings: Object.assign({work:30, break:5, notify:false}, d.settings),
+    currentMt: d.currentMt || (d.current ? d.current.start : 0),
+    updatedAt: d.updatedAt || 0
+  };
+}
+function mergeDb(x, y){
+  const a = normDb(x), b = normDb(y);
+  const deleted = {};
+  for(const src of [a.deleted, b.deleted]) for(const k of Object.keys(src)) deleted[k] = Math.max(deleted[k] || 0, src[k] || 0);
+  const map = new Map();
+  for(const s of a.sessions.concat(b.sessions)){
+    if(!s || !s.id || deleted[s.id]) continue;
+    const prev = map.get(s.id);
+    if(!prev || (s.mt || s.end || 0) > (prev.mt || prev.end || 0)) map.set(s.id, s);
+  }
+  const sessions = [...map.values()].sort((p,q) => p.start - q.start || String(p.id).localeCompare(String(q.id)));
+  let current = (a.currentMt >= b.currentMt ? a : b).current;
+  if(current && (deleted[current.id] || map.has(current.id))) current = null;
+  return {sessions, current, deleted,
+    settings: Object.assign({}, (a.updatedAt >= b.updatedAt ? a : b).settings),
+    currentMt: Math.max(a.currentMt, b.currentMt), updatedAt: Math.max(a.updatedAt, b.updatedAt)};
+}
+/* 中身が同じかどうかの比較用（並び順や通知済みフラグは無視） */
+function sig(d){
+  const n = normDb(d);
+  const c = n.current ? {...n.current, notified:undefined} : null;
+  return JSON.stringify([
+    n.sessions.slice().sort((p,q) => p.id < q.id ? -1 : 1).map(s => [s.id, s.mt || s.end, s.start, s.end, s.type, s.label, s.note]),
+    c, Object.keys(n.deleted).sort(), n.settings.work, n.settings.break, n.currentMt]);
+}
 const TKEY = 'worklog.token';   // トークンはデータ本体(db)に入れない＝サーバーに送らない
 const token = () => { try{ return localStorage.getItem(TKEY) || ''; }catch(e){ return ''; } };
 const api = (path, opts = {}) => fetch(path, {...opts, cache:'no-store',
@@ -210,13 +260,19 @@ const api = (path, opts = {}) => fetch(path, {...opts, cache:'no-store',
 function setSync(msg){ const el = document.querySelector('#syncStatus'); if(el) el.textContent = '同期: ' + msg; }
 if(!db.updatedAt && (db.sessions.length || db.current)){ db.updatedAt = Date.now(); Store.save(db); }
 
-function save(){ db.updatedAt = Date.now(); Store.save(db); push(); }
+function save(){ db.updatedAt = Date.now(); Store.save(db); push(); }   // 利用者の操作による変更（サーバーにも送る）
+function saveLocal(){ Store.save(db); }                                  // 端末内だけ（通知済みフラグなど）
 
-function adopt(sd){
+function adopt(m){
   const notify = db.settings.notify;   // 通知の許可は端末ごと
-  db = migrate(sd); db.settings.notify = notify;
+  const keepNotified = !!(db.current && m.current && db.current.id === m.current.id && db.current.notified);
+  db = migrate(m); db.settings.notify = notify;
+  if(db.current && keepNotified) db.current.notified = true;
   Store.save(db); render();
 }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+/* 操作の直前に最新の状態を取り込む（別の端末の操作に気づかず、古い状態から操作しないため） */
+async function fresh(){ if(token()) await Promise.race([pull(), sleep(1500)]); }
 async function authMsg(r){
   try{
     const j = await r.json();
@@ -231,9 +287,12 @@ async function push(){
   pushing = true;
   try{
     const r = await api('/api/state', {method:'PUT', body:JSON.stringify(db)});
-    if(r.status === 409){ adopt((await r.json()).db); setSync('他の端末の記録を取り込みました'); }
-    else if(r.status === 401) setSync(await authMsg(r));
-    else if(r.ok) setSync('OK（' + hm(Date.now()) + '）');
+    if(r.status === 401) setSync(await authMsg(r));
+    else if(r.ok){
+      const m = mergeDb(db, (await r.json()).db);   // サーバーで足し合わされた結果を、送信中に変わった手元の記録ともう一度足し合わせる
+      if(sig(m) !== sig(db)) adopt(m);
+      setSync('OK（' + hm(Date.now()) + '）');
+    }
     else setSync('エラー ' + r.status);
   }catch(e){ setSync('オフライン（あとで送信）'); }
   finally{ pushing = false; if(pushAgain){ pushAgain = false; push(); } }
@@ -245,9 +304,9 @@ async function pull(){
     if(r.status === 401){ setSync(await authMsg(r)); return; }
     if(!r.ok){ setSync('エラー ' + r.status); return; }
     const s = (await r.json()).db;
-    const sa = s ? (s.updatedAt || 0) : 0, la = db.updatedAt || 0;
-    if(sa > la) adopt(s);
-    else if(la > sa) await push();
+    const m = mergeDb(db, s);
+    if(sig(m) !== sig(db)) adopt(m);          // サーバーにだけある記録を取り込む
+    if(sig(m) !== sig(s)) await push();       // 手元にだけある記録をサーバーへ送る
     setSync('OK（' + hm(Date.now()) + '）');
   }catch(e){ setSync('オフライン'); }
 }
@@ -256,7 +315,6 @@ async function pull(){
 const $ = s => document.querySelector(s);
 const pad = n => String(n).padStart(2,'0');
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 const hm = t => { const d = new Date(t); return pad(d.getHours()) + ':' + pad(d.getMinutes()); };
 const dur = ms => { const m = Math.round(ms/60000); return m >= 60 ? Math.floor(m/60) + '時間' + pad(m%60) + '分' : m + '分'; };
 const hmm = ms => { const m = Math.round(ms/60000); return Math.floor(m/60) + ':' + pad(m%60); };
@@ -272,31 +330,41 @@ const WD = ['日','月','火','水','木','金','土'];
 function closeCurrent(end){
   const c = db.current; if(!c) return;
   if(end - c.start >= 1000){
-    db.sessions.push({id:uid(), type:c.type, label:c.label || '', start:c.start, end, planned:c.planned, note:c.note || ''});
+    // 区間のIDは「進行中の記録」のIDを引き継ぐ（別の端末が同じ記録を閉じても、重複しない）
+    db.sessions.push({id:c.id || uid(), type:c.type, label:c.label || '', start:c.start, end, planned:c.planned, note:c.note || '', mt:end});
+  } else if(c.id){
+    db.deleted[c.id] = end;
   }
   db.current = null;
 }
-function startWork(label){
+async function startWork(label){
+  await fresh();
   const now = Date.now(), c = db.current;
   if(c && c.type === 'work'){
     // 作業中のラベル切替：区間は分けるが、30分タイマーは続ける
     const keep = {planned:c.planned, notified:c.notified, blockStart:t0(c)};
     closeCurrent(now);
-    db.current = {type:'work', label, start:now, note:'', ...keep};
+    db.current = {id:uid(), type:'work', label, start:now, note:'', ...keep};
   } else {
     closeCurrent(now);
-    db.current = {type:'work', label, start:now, blockStart:now, planned:db.settings.work, notified:false, note:''};
+    db.current = {id:uid(), type:'work', label, start:now, blockStart:now, planned:db.settings.work, notified:false, note:''};
   }
+  db.currentMt = now;
   hideBanner(); save(); render();
 }
-function startBreak(){
+async function startBreak(){
+  await fresh();
   const now = Date.now();
   closeCurrent(now);
-  db.current = {type:'break', label:'', start:now, blockStart:now, planned:db.settings.break, notified:false, note:''};
+  db.current = {id:uid(), type:'break', label:'', start:now, blockStart:now, planned:db.settings.break, notified:false, note:''};
+  db.currentMt = now;
   hideBanner(); save(); render();
 }
-function stopAll(){
-  closeCurrent(Date.now());
+async function stopAll(){
+  await fresh();
+  const now = Date.now();
+  closeCurrent(now);
+  db.currentMt = now;
   hideBanner(); save(); render();
 }
 
@@ -336,7 +404,7 @@ function scheduleAlarm(){
 async function fire(c, late){
   const cur = db.current;
   if(!cur || t0(cur) !== t0(c) || cur.type !== c.type || cur.notified) return;
-  cur.notified = true; save();
+  cur.notified = true; saveLocal();   // 自動の保存は端末内だけ。サーバーへ送ると、古い画面が新しい記録を上書きしてしまう
   const msg = c.type === 'work' ? `${c.planned}分経ちました。休憩しましょう`
                                 : `休憩${c.planned}分が終わりました。作業に戻れます`;
   showBanner(late ? '予定時間を過ぎています：' + msg : msg);
@@ -545,8 +613,14 @@ function openEdit(id){
 $('#fCancel').onclick = () => dlg.close();
 $('#fDel').onclick = () => {
   if(!confirm('この区間を削除しますか？')) return;
-  if(editingId === 'cur') db.current = null;
-  else db.sessions = db.sessions.filter(s => s.id !== editingId);
+  const now = Date.now();
+  if(editingId === 'cur'){
+    if(db.current && db.current.id) db.deleted[db.current.id] = now;
+    db.current = null; db.currentMt = now;
+  } else {
+    db.deleted[editingId] = now;
+    db.sessions = db.sessions.filter(s => s.id !== editingId);
+  }
   save(); dlg.close(); render();
 };
 $('#fSave').onclick = () => {
@@ -559,13 +633,14 @@ $('#fSave').onclick = () => {
     const kindChanged = c.type !== tl.type;
     Object.assign(c, tl, {start, note});
     c.blockStart = kindChanged ? start : Math.min(t0(c), start);
+    db.currentMt = Date.now();
   } else {
     const end = fromLocalInput($('#fEnd').value);
     if(isNaN(end) || end <= start) return alert('終了は開始より後にしてください');
     if(editingId){
-      Object.assign(db.sessions.find(s => s.id === editingId), tl, {start, end, note});
+      Object.assign(db.sessions.find(s => s.id === editingId), tl, {start, end, note, mt:Date.now()});
     } else {
-      db.sessions.push({id:uid(), ...tl, start, end, planned:0, note});
+      db.sessions.push({id:uid(), ...tl, start, end, planned:0, note, mt:Date.now()});
     }
     db.sessions.sort((a,b) => a.start - b.start);
   }
@@ -582,6 +657,7 @@ $('#planInput').onchange = e => {
   c.planned = Math.max(0, Math.min(480, parseInt(e.target.value, 10) || 0));
   if(c.planned*60000 > Date.now() - t0(c)) c.notified = false;
   e.target.value = c.planned;
+  db.currentMt = Date.now();
   hideBanner(); save(); scheduleAlarm(); tick();
 };
 
@@ -602,13 +678,13 @@ $('#sClose').onclick = () => {
 };
 $('#syncNow').onclick = () => { saveToken(); setSync('同期中…'); pull(); };
 $('#sNotify').onchange = async e => {
-  if(!e.target.checked){ db.settings.notify = false; save(); return; }
+  if(!e.target.checked){ db.settings.notify = false; saveLocal(); return; }
   if(!('Notification' in window)){ e.target.checked = false; return alert('この環境は通知に対応していません'); }
   const p = await Notification.requestPermission();
   db.settings.notify = p === 'granted';
   e.target.checked = db.settings.notify;
   if(p !== 'granted') alert('通知が許可されませんでした');
-  save();
+  saveLocal();   // 通知の許可は端末ごとの設定なので、同期しない
 };
 function download(name, text, type){
   const a = document.createElement('a');
@@ -625,7 +701,26 @@ $('#exCsv').onclick = () => {
 };
 $('#clearAll').onclick = () => {
   if(!confirm('記録をすべて削除します。元に戻せません。')) return;
-  db = {sessions:[], current:null, settings:db.settings}; save(); sd.close(); render();
+  const now = Date.now(), del = {...db.deleted};
+  db.sessions.forEach(s => del[s.id] = now);            // 削除の印を残す（他の端末から復活しないように）
+  if(db.current && db.current.id) del[db.current.id] = now;
+  db = {sessions:[], current:null, deleted:del, settings:db.settings, currentMt:now, updatedAt:now};
+  save(); sd.close(); render();
+};
+
+/* JSON読み込み：書き出したJSONを、今の記録に「足し合わせる」（上書きしない） */
+$('#imJson').onclick = () => $('#imFile').click();
+$('#imFile').onchange = async e => {
+  const f = e.target.files[0]; if(!f) return;
+  try{
+    const inc = migrate(JSON.parse(await f.text()));
+    const m = mergeDb(db, inc);
+    m.settings = {...db.settings};                       // 設定は今のものを残す
+    const before = db.sessions.length;
+    adopt(m); db.updatedAt = Date.now(); save();
+    alert('取り込みました（区間 ' + before + '件 → ' + db.sessions.length + '件）');
+  }catch(err){ alert('読み込めませんでした：JSONの形式が違います'); }
+  e.target.value = '';
 };
 
 /* 起動 */
