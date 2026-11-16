@@ -32,6 +32,9 @@ button{font:inherit;color:inherit}
 @keyframes bob{0%,100%{transform:scale(1.03) translateY(0)}50%{transform:scale(1.03) translateY(-3px)}}
 @keyframes breathe{0%,100%{transform:scale(1.03)}50%{transform:scale(1.06)}}
 @media(prefers-reduced-motion:reduce){.mascot img{animation:none!important}}
+.today{text-align:center;color:var(--mute);font-size:13px;margin-top:2px}
+.today b{color:var(--fg);font-size:15px;font-variant-numeric:tabular-nums}
+tr.total td{font-weight:700;border-top:2px solid var(--line)}
 .state{display:flex;align-items:center;gap:8px;color:var(--mute);font-size:14px}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none;background:var(--other)}
 .clock{font-size:56px;font-weight:700;letter-spacing:.02em;font-variant-numeric:tabular-nums;text-align:center;margin:6px 0 0}
@@ -100,6 +103,7 @@ dialog input[type=checkbox]{width:auto;margin-right:8px}
     <div class="state"><span class="dot" id="stateDot"></span><span id="stateLabel">停止中</span></div>
     <div class="clock" id="clock">--:--</div>
     <div class="sub" id="sub"></div>
+    <div class="today" id="today"></div>
     <div class="banner" id="banner" hidden></div>
     <div class="plan" id="planRow" hidden>予定 <input id="planInput" type="number" min="0" max="480" inputmode="numeric"> 分（0=タイマーなし）</div>
     <div class="hint" id="startHint">作業を始める</div>
@@ -387,7 +391,7 @@ function tick(){
   }
   $('#sub').textContent = `${hm(t0(c))} から ・ 経過 ${dur(el)}`;
   if(c.planned > 0 && !c.notified && el >= c.planned*60000) fire(c, false);
-  if(++tickN % 60 === 0) renderTimeline();
+  if(++tickN % 60 === 0){ renderTimeline(); renderToday(); }
 }
 function startTick(){ stopTick(); tick(); iv = setInterval(tick, 1000); }
 function stopTick(){ if(iv){ clearInterval(iv); iv = null; } }
@@ -489,9 +493,16 @@ function renderMascot(c){
   img.alt = kind === 'work' ? '作業中の犬' : '眠っている犬';
 }
 
+/* 今日の作業合計（進行中の作業も含む）。1分ごとに更新 */
+function renderToday(){
+  const r = calc(inDay(0));
+  $('#today').innerHTML = `今日の作業 <b>${dur(r.work)}</b>　休憩 ${dur(r.break)}`;
+}
+
 function renderNow(){
   const c = db.current;
   renderMascot(c);
+  renderToday();
   $('#stateLabel').textContent = !c ? '停止中' : c.type === 'break' ? '休憩中' : c.label + ' を作業中';
   $('#stateDot').style.background = c ? COLORS[keyOf(c)] : 'var(--other)';
   $('#planRow').hidden = !c;
@@ -576,13 +587,21 @@ function renderTimeline(){
 }
 
 function renderWeek(){
-  let h = '<tr><th>日</th>' + LABELS.map(l => `<th>${esc(l)}</th>`).join('') + '<th>休憩</th><th>最長</th></tr>';
+  let h = '<tr><th>日</th>' + LABELS.map(l => `<th>${esc(l)}</th>`).join('') + '<th>作業計</th><th>休憩</th><th>最長</th></tr>';
+  const sum = {by:{}, brk:0, longest:0, work:0};
+  LABELS.forEach(l => sum.by[l] = 0);
   for(let i = 0; i < 7; i++){
     const di = dayInfo(i), r = calc(inDay(i));
+    LABELS.forEach(l => sum.by[l] += r.by[l] || 0);
+    sum.brk += r.break; sum.work += r.work; sum.longest = Math.max(sum.longest, r.longest);
     h += `<tr><td>${di.date.getMonth()+1}/${di.date.getDate()}(${WD[di.date.getDay()]})</td>` +
       LABELS.map(l => `<td>${hmm(r.by[l] || 0)}</td>`).join('') +
-      `<td>${hmm(r.break)}</td><td>${hmm(r.longest)}</td></tr>`;
+      `<td><b>${hmm(r.work)}</b></td><td>${hmm(r.break)}</td><td>${hmm(r.longest)}</td></tr>`;
   }
+  // 7日間の合計行（作業の合計は左の日付欄に表示）
+  h += `<tr class="total"><td>計</td>` +
+    LABELS.map(l => `<td>${hmm(sum.by[l])}</td>`).join('') +
+    `<td>${hmm(sum.work)}</td><td>${hmm(sum.brk)}</td><td>${hmm(sum.longest)}</td></tr>`;
   $('#week').innerHTML = h;
 }
 
